@@ -1,12 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-import matplotlib.pyplot as plt
 import tqdm
-from loss_functions import VGGPerceptualLoss
+import lpips
 
-perceptual_loss = VGGPerceptualLoss()
+perceptual_loss = lpips.LPIPS(net='alex').to('cuda' if torch.cuda.is_available() else 'cpu')
 
 class VQVAE(nn.Module):
     def __init__(self, embedding_dim=64, num_embeddings=512, commitment_cost=0.25):
@@ -14,61 +12,61 @@ class VQVAE(nn.Module):
         
         # Encoder network: Converts images to feature maps
         self.encoder = nn.Sequential(
-            # Input: 3x128x128 -> 32x64x64
-            nn.Conv2d(3, 32, kernel_size=4, stride=2, padding=1),
+            nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1),     # 128 → 64
             nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.Dropout(0.1),
-            # 32x64x64 -> 64x32x32
-            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1),
+            ResidualBlock(32),
+
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),    # 64 → 32
             nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.Dropout(0.1),
-            # 64x32x32 -> 128x16x16
-            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
+            ResidualBlock(64),
+
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),   # 32 → 16
             nn.BatchNorm2d(128),
             nn.ReLU(),
-            nn.Dropout(0.1),
-            # 128x16x16 -> 256x8x8
-            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),
+            ResidualBlock(128),
+
+            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),  # 16
             nn.BatchNorm2d(256),
             nn.ReLU(),
-            nn.Dropout(0.1),
-            # 256x8x8 -> 128x4x4
-            nn.Conv2d(256, embedding_dim, kernel_size=4, stride=2, padding=1),
+            ResidualBlock(256),
+
+            nn.Conv2d(256, embedding_dim, kernel_size=3, stride=1, padding=1),  # 16
             nn.BatchNorm2d(embedding_dim),
-            nn.ReLU()
+            nn.ReLU(),
         )
+
         
         # Fully connected layers for mean and log variance of the latent distribution
-        self.vq = VectorQuantizer(num_embeddings=num_embeddings, embedding_dim=embedding_dim, commitment_cost=commitment_cost)
+        self.vq = VectorQuantizerEMA(num_embeddings=num_embeddings, embedding_dim=embedding_dim, commitment_cost=commitment_cost)
         
         # Decoder network: Reconstructs images from latent representations
         self.decoder = nn.Sequential(
-            # Input: 128x4x4 -> 256x8x8
-            nn.ConvTranspose2d(embedding_dim, 256, kernel_size=4, stride=2, padding=1),
+            nn.ConvTranspose2d(embedding_dim, 256, kernel_size=3, stride=1, padding=1),  # 16
             nn.BatchNorm2d(256),
             nn.ReLU(),
-            nn.Dropout(0.1),
-            # 256x8x8 -> 128x16x16
-            nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1),
+            ResidualBlock(256),
+
+            nn.ConvTranspose2d(256, 128, kernel_size=3, stride=1, padding=1),           # 16
             nn.BatchNorm2d(128),
             nn.ReLU(),
-            nn.Dropout(0.1),
-            # 128x16x16 -> 64x32x32
-            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
+            ResidualBlock(128),
+
+            PixelShuffleBlock(128, 64),            # 16 → 32
             nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.Dropout(0.1),
-            # 64x32x32 -> 32x64x64
-            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),
+            ResidualBlock(64),
+
+            PixelShuffleBlock(64, 32),             # 32 → 64
             nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.Dropout(0.1),
-            # 32x64x64 -> 3x128x128
-            nn.ConvTranspose2d(32, 3, kernel_size=4, stride=2, padding=1),
-            nn.Sigmoid()  # Output normalized images in [-1, 1] range
+            ResidualBlock(32),
+
+            nn.ConvTranspose2d(32, 3, kernel_size=3, stride=2, padding=1, output_padding=1),              # 64 → 128
+            nn.Sigmoid()  # Use this if your images are normalized to [0, 1]
         )
+
     
     def forward(self, x):
         """
@@ -93,122 +91,103 @@ class VQVAE(nn.Module):
 
         return x_recon, vq_loss, perplexity, z_e, z_q, encoding_indices
 
-class VectorQuantizer(nn.Module):
-    def __init__(self, num_embeddings, embedding_dim, commitment_cost):
-        super(VectorQuantizer, self).__init__()
-
-        self.embedding_dim = embedding_dim
-        self.num_embeddings = num_embeddings
-        self.commitment_cost = commitment_cost
-
-        self.embeddings = nn.Embedding(num_embeddings, embedding_dim)
-        self.embeddings.weight.data.uniform_(-1 / num_embeddings, 1 / num_embeddings)
-
-    def forward(self, z):
-        """
-        z: shape [B, C, H, W]
-        """
-        # Flatten z -> [BHW, C]
-        z_perm = z.permute(0, 2, 3, 1).contiguous()  # [B, H, W, C]
-        flat_z = z_perm.view(-1, self.embedding_dim)  # [BHW, C]
-
-        # Compute distances to codebook entries: [BHW, K]
-        dist = (
-            flat_z.pow(2).sum(1, keepdim=True)
-            - 2 * flat_z @ self.embeddings.weight.t()
-            + self.embeddings.weight.pow(2).sum(1)
-        )  # ||z - e||^2
-
-        # Find closest embeddings
-        encoding_indices = torch.argmin(dist, dim=1).unsqueeze(1)  # [BHW, 1]
-        encodings = torch.zeros(encoding_indices.size(0), self.num_embeddings, device=z.device)
-        encodings.scatter_(1, encoding_indices, 1)  # one-hot [BHW, K]
-
-        # Quantize: lookup in codebook
-        quantized = encodings @ self.embeddings.weight  # [BHW, C]
-        B, H, W, C = z_perm.shape
-        quantized = quantized.view(B, H, W, C)
-        quantized = quantized.permute(0, 3, 1, 2).contiguous()  # back to [B, C, H, W]
-
-        # Compute loss terms
-        codebook_loss = F.mse_loss(quantized.detach(), z, reduction='mean')
-        commitment_loss = F.mse_loss(quantized, z.detach(), reduction='mean')
-        loss = codebook_loss + self.commitment_cost * commitment_loss
-
-        # Straight-through estimator
-        quantized = z + (quantized - z).detach()
-
-        # Perplexity
-        avg_probs = encodings.detach().mean(dim=0)
-        perplexity = torch.exp(-torch.sum(avg_probs * torch.log(avg_probs + 1e-10)))
-
-        return quantized, loss, perplexity, encoding_indices
-
 class VectorQuantizerEMA(nn.Module):
-    def __init__(self, num_embeddings, embedding_dim, commitment_cost, decay=0.99, epsilon=1e-5):
-        super(VectorQuantizerEMA, self).__init__()
-
-        self.embedding_dim = embedding_dim
+    def __init__(self, num_embeddings, embedding_dim, commitment_cost, decay=0.99, eps=1e-5):
+        super().__init__()
         self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
         self.commitment_cost = commitment_cost
         self.decay = decay
-        self.epsilon = epsilon
+        self.eps = eps
 
-        # Actual embedding weights (not learnable by gradient)
-        self.register_buffer("embedding", torch.randn(num_embeddings, embedding_dim))
-        self.register_buffer("ema_cluster_size", torch.zeros(num_embeddings))
-        self.register_buffer("ema_embedding", self.embedding.clone())
+        # Codebook and EMA buffers: [K, D]
+        embed = torch.randn(num_embeddings, embedding_dim)
+        self.register_buffer("embedding", embed)          # actual codebook
+        self.register_buffer("ema_w", embed.clone())      # EMA numerator (sum of assigned vectors)
+        self.register_buffer("cluster_size", torch.zeros(num_embeddings))  # EMA denominator (counts)
 
-    def forward(self, z):
-        # Reshape input
-        z_perm = z.permute(0, 2, 3, 1).contiguous()  # [B, H, W, C]
-        flat_z = z_perm.view(-1, self.embedding_dim)  # [BHW, C]
+    def forward(self, inputs):
+        """
+        inputs: [B, C, H, W]
+        returns: quantized, loss, perplexity, encoding_indices
+        """
+        B, C, H, W = inputs.shape
+        # Flatten to [N, D]
+        flat_input = inputs.permute(0, 2, 3, 1).contiguous().view(-1, self.embedding_dim)
 
-        # Compute distances and encoding indices
-        dist = (
-            flat_z.pow(2).sum(1, keepdim=True)
-            - 2 * flat_z @ self.embedding.t()
-            + self.embedding.pow(2).sum(1)
-        )
-        encoding_indices = torch.argmin(dist, dim=1)  # [BHW]
-        encodings = F.one_hot(encoding_indices, self.num_embeddings).type(flat_z.dtype)  # [BHW, K]
+        # Distances to embeddings: [N, K]
+        # ||x||^2 - 2 x·e + ||e||^2
+        # embedding: [K, D]
+        with torch.no_grad():  # distances don't need grad
+            e2 = (self.embedding ** 2).sum(dim=1)                 # [K]
+            x2 = (flat_input ** 2).sum(dim=1, keepdim=True)       # [N,1]
+            xe = flat_input @ self.embedding.t()                  # [N,K]
+            distances = x2 - 2 * xe + e2.unsqueeze(0)             # [N,K]
 
-        # Quantize
-        quantized = encodings @ self.embedding  # [BHW, C]
-        quantized = quantized.view(*z_perm.shape).permute(0, 3, 1, 2).contiguous()  # [B, C, H, W]
+            # Nearest code indices
+            encoding_indices = torch.argmin(distances, dim=1)     # [N]
 
+        # Quantize by lookup and reshape back to [B,C,H,W]
+        quantized = self.embedding.index_select(0, encoding_indices)  # [N, D]
+        quantized = quantized.view(B, H, W, C).permute(0, 3, 1, 2).contiguous()
+
+        # EMA updates (no graph, in place)
         if self.training:
-            # EMA updates
-            ema_cluster_size = encodings.sum(0)
-            ema_embedding_sum = encodings.T @ flat_z
+            with torch.no_grad():
+                # Counts per code: [K]
+                counts = torch.bincount(encoding_indices, minlength=self.num_embeddings).to(self.cluster_size.dtype)
 
-            # Laplace smoothing of cluster size
-            self.ema_cluster_size.mul_(self.decay).add_(ema_cluster_size * (1 - self.decay))
-            self.ema_embedding.mul_(self.decay).add_(ema_embedding_sum * (1 - self.decay))
+                # Sums of assigned vectors per code: [K, D]
+                sums = torch.zeros_like(self.ema_w)               # [K, D]
+                sums.index_add_(0, encoding_indices, flat_input)  # scatter add
+                
+                # EMA update
+                self.cluster_size.mul_(self.decay).add_(counts, alpha=1 - self.decay)
+                self.ema_w.mul_(self.decay).add_(sums, alpha=1 - self.decay)
 
-            # Normalize to get updated embeddings
-            n = self.ema_cluster_size.sum()
-            cluster_size = (
-                (self.ema_cluster_size + self.epsilon)
-                / (n + self.num_embeddings * self.epsilon)
-                * n
-            )
-            self.embedding = self.ema_embedding / cluster_size.unsqueeze(1)
+                # Normalization to avoid shrinking when codes are rare
+                n = self.cluster_size.sum()
+                # Re-normalize cluster_size so sums/size ~ running mean
+                cluster_size = (self.cluster_size + self.eps) / (n + self.num_embeddings * self.eps) * n
+                # Update codebook
+                self.embedding.copy_(self.ema_w / cluster_size.clamp_min(self.eps).unsqueeze(1))
 
-        # Loss
-        commitment_loss = F.mse_loss(quantized.detach(), z, reduction='mean')
-        loss = self.commitment_cost * commitment_loss
+        # Commitment loss only (no codebook loss with EMA)
+        commit_loss = F.mse_loss(quantized.detach(), inputs, reduction="mean")
+        loss = self.commitment_cost * commit_loss
 
-        # Straight-through estimator
-        quantized = z + (quantized - z).detach()
+        # Straight-through: gradients w.r.t. inputs
+        quantized = inputs + (quantized - inputs).detach()
 
-        # Perplexity
-        avg_probs = encodings.mean(dim=0)
-        perplexity = torch.exp(-torch.sum(avg_probs * torch.log(avg_probs + 1e-10)))
+        # Perplexity (usage metric) without one-hot
+        with torch.no_grad():
+            probs = torch.bincount(encoding_indices, minlength=self.num_embeddings).float()
+            probs = probs / probs.sum().clamp_min(self.eps)
+            perplexity = torch.exp(-(probs * (probs + 1e-10).log()).sum())
 
         return quantized, loss, perplexity, encoding_indices
 
-
+class ResidualBlock(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(channels, channels, 3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(channels, channels, 3, padding=1),
+        )
+    def forward(self, x):
+        return x + self.block(x)
+    
+class PixelShuffleBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, upscale_factor=2):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels * upscale_factor**2, kernel_size=3, padding=1),
+            nn.PixelShuffle(upscale_factor),
+            nn.ReLU()
+        )
+    def forward(self, x):
+        return self.net(x)
 
 def construct_vae(device, embedding_dim=256, num_embeddings=512, commitment=0.25):
     """ 
@@ -236,7 +215,7 @@ def optimizer(vae, learning_rate=3e-4):
     """
     return torch.optim.Adam(vae.parameters(), lr=learning_rate)
 
-def train(vae, device, train_loader, optimizer, lmd=0.1):
+def train(vae, device, train_loader, optimizer, lmd_lpips=0.1, lmd_l1 = 0.05):
     """
     Trains the VQ-VAE for one epoch.
     """
@@ -256,7 +235,10 @@ def train(vae, device, train_loader, optimizer, lmd=0.1):
 
         # Loss
         recon_loss = F.mse_loss(x_recon, data, reduction='mean')
-        loss = recon_loss + vq_loss #+ lmd * perceptual_loss(x_recon, data)
+        recon_loss = F.l1_loss(x_recon, data, reduction='mean')
+        l1_loss = F.l1_loss(x_recon, data, reduction='mean')
+        lpips_loss = perceptual_loss(x_recon, data).mean()
+        loss = recon_loss + vq_loss + lmd_lpips * lpips_loss + lmd_l1 * l1_loss
         loss.backward()
         optimizer.step()
 
