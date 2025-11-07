@@ -12,27 +12,32 @@ class VQVAE(nn.Module):
         
         # Encoder network: Converts images to feature maps
         self.encoder = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1),     # 128 → 64
+            # 128 → 64
+            nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(32),
             nn.ReLU(),
             ResidualBlock(32),
 
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),    # 64 → 32
+            # 64 → 32
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
             ResidualBlock(64),
 
-            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),   # 32 → 16
+            # 32 → 16
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(128),
             nn.ReLU(),
             ResidualBlock(128),
 
-            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),  # 16
+            # 16 → 16
+            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(256),
             nn.ReLU(),
             ResidualBlock(256),
 
-            nn.Conv2d(256, embedding_dim, kernel_size=3, stride=1, padding=1),  # 16
+            # 16 → 16
+            nn.Conv2d(256, embedding_dim, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(embedding_dim),
             nn.ReLU(),
         )
@@ -43,28 +48,33 @@ class VQVAE(nn.Module):
         
         # Decoder network: Reconstructs images from latent representations
         self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(embedding_dim, 256, kernel_size=3, stride=1, padding=1),  # 16
+            # 16 → 16
+            nn.ConvTranspose2d(embedding_dim, 256, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(256),
             nn.ReLU(),
             ResidualBlock(256),
 
-            nn.ConvTranspose2d(256, 128, kernel_size=3, stride=1, padding=1),           # 16
+            # 16 → 16
+            nn.ConvTranspose2d(256, 128, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(128),
             nn.ReLU(),
             ResidualBlock(128),
 
-            PixelShuffleBlock(128, 64),            # 16 → 32
+            # 16 → 32
+            PixelShuffleBlock(128, 64),
             nn.BatchNorm2d(64),
             nn.ReLU(),
             ResidualBlock(64),
 
-            PixelShuffleBlock(64, 32),             # 32 → 64
+            # 32 → 64
+            PixelShuffleBlock(64, 32),
             nn.BatchNorm2d(32),
             nn.ReLU(),
             ResidualBlock(32),
 
-            nn.ConvTranspose2d(32, 3, kernel_size=3, stride=2, padding=1, output_padding=1),              # 64 → 128
-            nn.Sigmoid()  # Use this if your images are normalized to [0, 1]
+            # 64 → 128
+            nn.ConvTranspose2d(32, 3, kernel_size=3, stride=2, padding=1, output_padding=1), 
+            nn.Sigmoid()
         )
 
     
@@ -102,9 +112,9 @@ class VectorQuantizerEMA(nn.Module):
 
         # Codebook and EMA buffers: [K, D]
         embed = torch.randn(num_embeddings, embedding_dim)
-        self.register_buffer("embedding", embed)          # actual codebook
-        self.register_buffer("ema_w", embed.clone())      # EMA numerator (sum of assigned vectors)
-        self.register_buffer("cluster_size", torch.zeros(num_embeddings))  # EMA denominator (counts)
+        self.register_buffer("embedding", embed)
+        self.register_buffer("ema_w", embed.clone())
+        self.register_buffer("cluster_size", torch.zeros(num_embeddings))
 
     def forward(self, inputs):
         """
@@ -112,34 +122,31 @@ class VectorQuantizerEMA(nn.Module):
         returns: quantized, loss, perplexity, encoding_indices
         """
         B, C, H, W = inputs.shape
-        # Flatten to [N, D]
         flat_input = inputs.permute(0, 2, 3, 1).contiguous().view(-1, self.embedding_dim)
 
         # Distances to embeddings: [N, K]
-        # ||x||^2 - 2 x·e + ||e||^2
-        # embedding: [K, D]
         with torch.no_grad():  # distances don't need grad
-            e2 = (self.embedding ** 2).sum(dim=1)                 # [K]
-            x2 = (flat_input ** 2).sum(dim=1, keepdim=True)       # [N,1]
-            xe = flat_input @ self.embedding.t()                  # [N,K]
-            distances = x2 - 2 * xe + e2.unsqueeze(0)             # [N,K]
+            e2 = (self.embedding ** 2).sum(dim=1)
+            x2 = (flat_input ** 2).sum(dim=1, keepdim=True)
+            xe = flat_input @ self.embedding.t()
+            distances = x2 - 2 * xe + e2.unsqueeze(0)
 
             # Nearest code indices
-            encoding_indices = torch.argmin(distances, dim=1)     # [N]
+            encoding_indices = torch.argmin(distances, dim=1)
 
         # Quantize by lookup and reshape back to [B,C,H,W]
-        quantized = self.embedding.index_select(0, encoding_indices)  # [N, D]
+        quantized = self.embedding.index_select(0, encoding_indices)
         quantized = quantized.view(B, H, W, C).permute(0, 3, 1, 2).contiguous()
 
-        # EMA updates (no graph, in place)
+        # EMA updates
         if self.training:
             with torch.no_grad():
                 # Counts per code: [K]
                 counts = torch.bincount(encoding_indices, minlength=self.num_embeddings).to(self.cluster_size.dtype)
 
                 # Sums of assigned vectors per code: [K, D]
-                sums = torch.zeros_like(self.ema_w)               # [K, D]
-                sums.index_add_(0, encoding_indices, flat_input)  # scatter add
+                sums = torch.zeros_like(self.ema_w)
+                sums.index_add_(0, encoding_indices, flat_input)
                 
                 # EMA update
                 self.cluster_size.mul_(self.decay).add_(counts, alpha=1 - self.decay)
