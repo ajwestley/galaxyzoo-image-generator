@@ -51,7 +51,7 @@ class PixelCNN(nn.Module):
             for j in range(W):
                 
                 # Forward pass
-                logits = self(z.float())  # (1, K, H, W)
+                logits = self(z)  # (1, K, H, W)
                 
                 # Get logits for current position
                 logits_ij = logits[:, i, j]  # (K,)
