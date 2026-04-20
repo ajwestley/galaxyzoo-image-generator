@@ -4,3 +4,4 @@
 /training_images
 /latent_images
 /__pycache__
+*/__pycache__
