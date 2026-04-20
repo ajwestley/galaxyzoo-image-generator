@@ -1,4 +1,7 @@
 import torch
+import random
+from torch.utils.data import Dataset
+from pathlib import Path
 from torch.utils.data import Dataset, DataLoader, Subset
 
 class LatentIndicesDataset(Dataset):
@@ -25,3 +28,21 @@ class LatentIndicesDataset(Dataset):
     
     def __len__(self):
         return len(self.indices_files)
+
+def get_dataloader(data_folder, batch_size, n=50000, seed=42):
+
+    random.seed(seed)
+
+    # Create dataset
+    full_dataset = LatentIndicesDataset(data_folder)
+
+    # Select 50k random images
+    all_indices = list(range(len(full_dataset)))
+    random.shuffle(all_indices)
+    subset_indices = all_indices[:n]
+
+    # Subset + DataLoader
+    dataset = Subset(full_dataset, subset_indices)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+
+    return loader

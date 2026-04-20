@@ -91,8 +91,6 @@ class VQVAE(nn.Module):
 
         # 2. Vector Quantization
         z_q, vq_loss, perplexity, encoding_indices = self.vq(z_e)
-        
-        print(z_q.shape, z_e.shape)
 
         # 3. Decode
         x_recon = self.decoder(z_q)  # shape [B, 3, 128, 128]
