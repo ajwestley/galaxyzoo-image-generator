@@ -2,4 +2,5 @@
 /Images
 /RegularVAE
 /training_images
+/latent_images
 /__pycache__

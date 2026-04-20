@@ -1,6 +1,6 @@
 import re
 import torch
-from VQ_VAE import VQVAE
+from VAE.VQ_VAE import VQVAE
 
 def load_model(
     model_file: str, 

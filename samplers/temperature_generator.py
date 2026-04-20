@@ -4,8 +4,8 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from matplotlib.pyplot import imsave
-from VQ_VAE import VQVAE
-from generator_utils import load_model
+from VAE.VQ_VAE import VQVAE
+from samplers.generator_utils import load_model
 
 DEFAULT_MODEL_PATH = 'models/galaxy_vae.pth'
 DEFAULT_FREQ_PATH = 'models/frequencies.pkl'
