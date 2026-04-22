@@ -1,7 +1,7 @@
 {
     "input_dim": 1024,
     "output_dim": 1024,
-    "residual_blocks": 8,
+    "residual_blocks": 12,
     "filters": 128,
     "epochs": 100,
     "batch_size": 128

@@ -12,20 +12,19 @@ class PixelCNN(nn.Module):
         filters: int
     ) -> None:
         super(PixelCNN, self).__init__()
-        self.input_layer = MaskConv2D('A', in_channels, filters, kernel_size=7, padding=3)
+        self.embedding = nn.Embedding(in_channels, filters)
+        self.input_layer = MaskConv2D('A', filters, filters, kernel_size=7, padding=3)
         
         self.residual_blocks = nn.ModuleList([MaskedResBlock(filters, filters) for _ in range(num_res)])
         
         self.final_mask = MaskConv2D('B', filters, filters, kernel_size=1)
-        # self.output_mask = MaskConv2D('B', filters, out_channels, kernel_size=1)
-        
         self.output = nn.Conv2d(filters, out_channels, kernel_size=1)
         
         self.relu = nn.ReLU()
     
     def forward(self, x: torch.Tensor):
-        x = F.one_hot(x, num_classes=self.output.out_channels)
-        x = x.permute(0, 3, 1, 2).float()
+        x = self.embedding(x)
+        x = x.permute(0, 3, 1, 2)
         
         x = self.input_layer(x)
         x = self.relu(x)
@@ -54,7 +53,7 @@ class PixelCNN(nn.Module):
                 logits = self(z)  # (1, K, H, W)
                 
                 # Get logits for current position
-                logits_ij = logits[:, i, j]  # (K,)
+                logits_ij = logits[0, :, i, j]
                 
                 # Convert to probabilities
                 probs = F.softmax(logits_ij, dim=0)

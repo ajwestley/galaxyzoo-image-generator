@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from typing import Literal, Any
 
@@ -78,9 +79,17 @@ class MaskConv2D(nn.Module):
         Returns:
             Output tensor after masked convolution
         """
-        self.conv.weight.data = self.conv.weight.data * self.mask
+        weight = self.conv.weight * self.mask
         
-        return self.conv(x.float())
+        return F.conv2d(
+            x,
+            weight,
+            bias=self.conv.bias,
+            stride=self.conv.stride,
+            padding=self.conv.padding,
+            dilation=self.conv.dilation,
+            groups=self.conv.groups,
+        )
 
 class MaskedResBlock(nn.Module):
     ''''''
