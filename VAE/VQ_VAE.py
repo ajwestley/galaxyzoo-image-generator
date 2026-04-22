@@ -3,8 +3,25 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class VQVAE(nn.Module):
-    def __init__(self, embedding_dim=64, num_embeddings=512, commitment_cost=0.25):
+    """A Vector Quantized Variational Autoencoder (VQ-VAE) implementation for image reconstruction."""
+    def __init__(
+        self, 
+        embedding_dim: int = 64, 
+        num_embeddings: int = 512, 
+        commitment_cost: float = 0.25, 
+        image_dims: tuple[int, int] = (128, 128)
+        ):
+        """
+        Initialise the model.
+
+        Args:
+            embedding_dim (int, optional): The length of each latent vector. Defaults to 64.
+            num_embeddings (int, optional): The number of embeddings in the codebook. Defaults to 512.
+            commitment_cost (float, optional): The cost of commitment to the codebook. Defaults to 0.25.
+            image_dims (tuple[int, int], optional): The dimensions of the input images. Defaults to (128, 128).
+        """
         super(VQVAE, self).__init__()
+        self.image_dims = image_dims
         
         # Encoder network: Converts images to feature maps
         self.encoder = nn.Sequential(
@@ -98,6 +115,7 @@ class VQVAE(nn.Module):
         return x_recon, vq_loss, perplexity, z_e, z_q, encoding_indices
 
 class VectorQuantizerEMA(nn.Module):
+    """Vector Quantizer with Exponential Moving Average (EMA) updates for the codebook."""
     def __init__(self, num_embeddings, embedding_dim, commitment_cost, decay=0.99, eps=1e-5):
         super().__init__()
         self.num_embeddings = num_embeddings
@@ -112,10 +130,15 @@ class VectorQuantizerEMA(nn.Module):
         self.register_buffer("ema_w", embed.clone())
         self.register_buffer("cluster_size", torch.zeros(num_embeddings))
 
-    def forward(self, inputs):
+    def forward(self, inputs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        inputs: [B, C, H, W]
-        returns: quantized, loss, perplexity, encoding_indices
+        
+
+        Args:
+            inputs (torch.Tensor): Input tensor of shape [B, C, H, W] where C is the embedding dimension.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]: Quantized tensor, loss, perplexity, and encoding indices.
         """
         B, C, H, W = inputs.shape
         flat_input = inputs.permute(0, 2, 3, 1).contiguous().view(-1, self.embedding_dim)
@@ -171,6 +194,7 @@ class VectorQuantizerEMA(nn.Module):
         return quantized, loss, perplexity, encoding_indices
 
 class ResidualBlock(nn.Module):
+    """Simple residual block with two convolutional layers."""
     def __init__(self, channels):
         super().__init__()
         self.block = nn.Sequential(
@@ -182,6 +206,7 @@ class ResidualBlock(nn.Module):
         return x + self.block(x)
     
 class PixelShuffleBlock(nn.Module):
+    """Upscaling block using Pixel Shuffle for efficient upsampling."""
     def __init__(self, in_channels, out_channels, upscale_factor=2):
         super().__init__()
         self.net = nn.Sequential(

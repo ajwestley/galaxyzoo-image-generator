@@ -3,22 +3,11 @@ import torch.nn.functional as F
 import tqdm
 
 def optimizer(cnn, learning_rate=3e-4):
-    """
-    Constructs an optimizer for the PixelCNN.
-    
-    Args:
-        cnn (PixelCNN): The PixelCNN model to optimize
-        learning_rate (float): Learning rate for the optimizer
-        
-    Returns:
-        torch.optim.Optimizer: Configured optimizer
-    """
+    """Constructs an optimizer for the PixelCNN."""
     return torch.optim.Adam(cnn.parameters(), lr=learning_rate)
 
 def train(model, dataloader, optimizer, device):
-    """
-    Trains the PixelCNN for one epoch.
-    """
+    """Trains the PixelCNN for a single epoch"""
     model.train()
     
     total_loss = 0.0

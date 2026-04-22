@@ -92,8 +92,17 @@ class MaskConv2D(nn.Module):
         )
 
 class MaskedResBlock(nn.Module):
-    ''''''
+    """
+    A masked residual block.
+    """
     def __init__(self, in_channels: int, filters: int):
+        """
+        Initialise the block.
+
+        Args:
+            in_channels (int): The number of input channels (should match the number of output channels).
+            filters (int): The number of filters to use in the internal convolutional layers.
+        """
         super().__init__()
         self.conv1 = nn.Conv2d(in_channels=in_channels, out_channels=filters//2, kernel_size=1)
         self.pixel_conv = MaskConv2D(mask_type='B', in_channels=filters//2, out_channels=filters//2, kernel_size=3, padding=1)
@@ -101,6 +110,16 @@ class MaskedResBlock(nn.Module):
         self.relu = nn.ReLU()
         
     def forward(self, res: torch.Tensor):
+        """
+        Performs one forward pass through the block.
+
+        Args:
+            res (torch.Tensor): The input tensor of shape (batch, in_channels, height, width). 
+                The number of channels should match the in_channels specified during initialization.
+
+        Returns:
+            The output tensor after the residual connection.
+        """
         x = self.conv1(res)
         x = self.relu(x)
         

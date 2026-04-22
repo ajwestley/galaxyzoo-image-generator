@@ -1,0 +1,10 @@
+{
+    "vqvae_path": "models/galaxy_vae.pth",
+    "pixelcnn_path": "models/galaxy_pixelcnn.pth",
+    "num_embeddings": 1024,
+    "embedding_dimensions": 64,
+    "residual_blocks": 12,
+    "filters": 128,
+    "image_w": 128,
+    "image_h": 128
+}

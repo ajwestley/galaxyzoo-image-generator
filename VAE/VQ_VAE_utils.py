@@ -7,35 +7,16 @@ from VAE.VQ_VAE import VQVAE
 perceptual_loss = lpips.LPIPS(net='alex').to('cuda' if torch.cuda.is_available() else 'cpu')
 
 def construct_vae(device, embedding_dim=256, num_embeddings=512, commitment=0.25):
-    """ 
-    Constructs a Variational Autoencoder (VAE) model.
-    
-    Args:
-        device (torch.device): Device to run the model on (CPU or GPU)
-        latent_dim (int): Dimensionality of the latent space
-    
-    Returns:
-        VAE: Configured Variational Autoencoder model
-    """
+    """Constructs a VQ-VAE model."""
     return VQVAE(embedding_dim, num_embeddings, commitment).to(device)
 
 def optimizer(vae, learning_rate=3e-4):
-    """
-    Constructs an optimizer for the VAE.
-    
-    Args:
-        vae (VAE): The Variational Autoencoder model
-        learning_rate (float): Learning rate for the optimizer
-        
-    Returns:
-        torch.optim.Optimizer: Configured optimizer
-    """
+    """Constructs an optimizer for the VQ-VAE."""
     return torch.optim.Adam(vae.parameters(), lr=learning_rate)
 
-def train(vae, device, train_loader, optimizer, lmd_lpips=0.1, lmd_l1 = 0.05):
-    """
-    Trains the VQ-VAE for one epoch.
-    """
+def train(vae, device, train_loader, optimizer, commitment_cost, lmd_lpips=0.1, lmd_l1 = 0.05):
+    """Trains the VQ-VAE for one epoch."""
+    vae.vq.commitment_cost = commitment_cost
     vae.train()
     train_loss = 0.0
     rec_loss = 0.0
