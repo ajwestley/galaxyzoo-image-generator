@@ -80,3 +80,22 @@ Due to resource limitations, I trained the VQ-VAE separate from the PixelCNN.
 This manner of training also produces a good bases for the sampling to work on top of.
 
 All training functions are in the respective model's `model_utils.py` file.
+
+
+## Examples
+
+### Temperature = 0.5
+
+![](example_images/temp0.5_1.png) ![](example_images/temp0.5_2.png) ![](example_images/temp0.5_3.png)
+
+### Temperature = 1.0
+
+![](example_images/temp1_1.png) ![](example_images/temp1_2.png) ![](example_images/temp1_3.png)
+
+### Temperature = 1.5
+
+![](example_images/temp1.5_1.png) ![](example_images/temp1.5_2.png) ![](example_images/temp1.5_3.png)
+
+### Temperature = 2.2
+
+![](example_images/temp2.2_1.png) ![](example_images/temp2.2_2.png) ![](example_images/temp2.2_3.png)
