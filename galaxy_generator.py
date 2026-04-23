@@ -3,11 +3,10 @@ from image_generator import ImageGenerator
 
 DEFAULT_CONFIG_PATH = 'models/GalaxyGen.json'
 
-
 def main():
     parser = ArgumentParser(
             prog='Galaxy image generator',
-            description='Generate images of galaxies using a pretrained VQ-VAE.'
+            description='Generate images of galaxies using a pretrained PixelCNN and VQ-VAE.'
         )
     
     parser.add_argument('-t', '--temperature', default=1.0)
